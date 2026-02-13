@@ -1,0 +1,39 @@
+name: Build One-Click Windows Package (Bun)
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "latest"
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build one-click package
+        run: bun run build:win:oneclick:native
+
+      - name: Zip one-click package
+        shell: pwsh
+        run: |
+          $src = "dist\oneclick-win-x64"
+          if (!(Test-Path $src)) { throw "Folder not found: $src" }
+          Compress-Archive -Path "$src\*" -DestinationPath "dist\oneclick-win-x64.zip" -Force
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: oneclick-win-x64
+          path: dist/oneclick-win-x64.zip

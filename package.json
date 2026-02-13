@@ -1,0 +1,27 @@
+{
+  "name": "rec-cx-combin",
+  "version": "1.0.0",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "bun run src/index.ts",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "build:win": "bun build src/index.ts --compile --target=bun-windows-x64 --outfile dist/rec-cx-combine.exe",
+    "build:win-arm": "bun build src/index.ts --compile --target=bun-windows-arm64 --outfile dist/rec-cx-combine-arm64.exe",
+    "build:win:native": "bun build src/index.ts --compile --outfile dist/rec-cx-combine.exe",
+    "build:win:oneclick": "bun run build:win && bun run scripts/build-oneclick-win.mjs",
+    "build:win:oneclick:native": "bun run build:win:native && bun run scripts/build-oneclick-win.mjs"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^25.2.3"
+  },
+  "peerDependencies": {
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "exceljs": "^4.4.0",
+    "xlsx": "^0.18.5"
+  }
+}
