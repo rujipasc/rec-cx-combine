@@ -6,7 +6,7 @@ on:
       - "v*"
 
 permissions:
-  contents: write   # สำคัญ: ให้สิทธิ์อัปโหลดไฟล์เข้า Release
+  contents: write
 
 jobs:
   build-and-release:
@@ -28,6 +28,7 @@ jobs:
         run: bun run build:win:oneclick:native
 
       - name: Zip one-click package
+        id: zip
         shell: pwsh
         run: |
           $tag = "${{ github.ref_name }}"
@@ -35,10 +36,10 @@ jobs:
           if (!(Test-Path $src)) { throw "Folder not found: $src" }
           $zip = "dist\oneclick-win-x64-$tag.zip"
           Compress-Archive -Path "$src\*" -DestinationPath $zip -Force
-          echo "ZIP_PATH=$zip" >> $env:GITHUB_ENV
+          "zip_path=$zip" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Create/Update GitHub Release and upload asset
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ env.ZIP_PATH }}
+          files: ${{ steps.zip.outputs.zip_path }}
           generate_release_notes: true

@@ -3,8 +3,7 @@ name: Build One-Click Windows Package (Bun)
 on:
   workflow_dispatch:
   push:
-    tags:
-      - "v*"
+    branches: [ "main" ]
 
 jobs:
   build:
