@@ -2,8 +2,6 @@ name: Build One-Click Windows Package (Bun)
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ "main" ]
 
 jobs:
   build:
