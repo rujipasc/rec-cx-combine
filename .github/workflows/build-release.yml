@@ -33,13 +33,21 @@ jobs:
         run: |
           $tag = "${{ github.ref_name }}"
           $src = "dist\oneclick-win-x64"
-          if (!(Test-Path $src)) { throw "Folder not found: $src" }
-          $zip = "dist\oneclick-win-x64-$tag.zip"
+          if (!(Test-Path $src)) {
+            Write-Host "Directory not found:"
+            Get-ChildItem dist -Recurse
+            throw "oneclick folder not found"
+          }
+
+          $zip = "oneclick-win-x64-$tag.zip"
           Compress-Archive -Path "$src\*" -DestinationPath $zip -Force
           "zip_path=$zip" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-      - name: Create/Update GitHub Release and upload asset
+      - name: Upload asset to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: ${{ steps.zip.outputs.zip_path }}
-          generate_release_notes: true
+          body: |
+            ✅ Windows One-Click Download
+            - Download: oneclick-win-x64-${{ github.ref_name }}.zip
+            - Extract → put files in /input → double-click run.bat
