@@ -1,0 +1,44 @@
+name: Release One-Click Windows Package
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write   # สำคัญ: ให้สิทธิ์อัปโหลดไฟล์เข้า Release
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "latest"
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build one-click package
+        run: bun run build:win:oneclick:native
+
+      - name: Zip one-click package
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $src = "dist\oneclick-win-x64"
+          if (!(Test-Path $src)) { throw "Folder not found: $src" }
+          $zip = "dist\oneclick-win-x64-$tag.zip"
+          Compress-Archive -Path "$src\*" -DestinationPath $zip -Force
+          echo "ZIP_PATH=$zip" >> $env:GITHUB_ENV
+
+      - name: Create/Update GitHub Release and upload asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.ZIP_PATH }}
+          generate_release_notes: true
