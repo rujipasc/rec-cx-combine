@@ -4,78 +4,45 @@ import path from "node:path";
 import os from "node:os";
 import ExcelJS from "exceljs";
 import * as XLSX from "xlsx";
- 
+
 // =========================
 // CONFIG
 // =========================
 const SHEET_CANDIDATE = "candidate_master";
 const SHEET_JR = "JR_Detail";
- 
+
 const CANDIDATE_KEY = "รหัสบัตรประชาชน";
 const JR_KEY = "รหัสใบร้องขอ/ID";
 const JR_NO_ALIAS = "JR No.";
- 
+
 // 10 columns base ที่ “อัปเดตได้” ตอน upsert
 const CANDIDATE_BASE_COLS = [
-  "คำนำหน้าชื่อ",
-  "ชื่อ (ไทย)",
-  "สกุล (ไทย)",
-  "ชื่อ (อังกฤษ)",
-  "สกุล (อังกฤษ)",
-  "ชื่อเล่น",
-  "รหัสบัตรประชาชน",
-  "วันเกิด",
-  "เบอร์ติดต่อ",
-  "email",
+  "คำนำหน้าชื่อ", "ชื่อ (ไทย)", "สกุล (ไทย)", "ชื่อ (อังกฤษ)",
+  "สกุล (อังกฤษ)", "ชื่อเล่น", "รหัสบัตรประชาชน", "วันเกิด",
+  "เบอร์ติดต่อ", "email",
 ] as const;
- 
-// Header order ที่คุณให้ (ใช้เป็นลำดับคอลัมน์ใน candidate_master)
+
+// Header order
 const CANDIDATE_OUTPUT_HEADER_ORDER: string[] = [
-  "คำนำหน้าชื่อ",
-  "ชื่อ (ไทย)",
-  "สกุล (ไทย)",
-  "ชื่อ (อังกฤษ)",
-  "สกุล (อังกฤษ)",
-  "ชื่อเล่น",
-  "รหัสบัตรประชาชน",
-  "วันเกิด",
-  "เบอร์ติดต่อ",
-  "email",
-  "JR No.",
-  "หน่วยธุรกิจ/BU",
-  "ตำแหน่งที่ขอรับ/Requested Position",
-  "ประเภทการจ้าง/Employment Category",
-  "ระดับ/Level",
-  "ผู้รับผิดชอบ/Manage by",
-  "สถานะล่าสุด/Latest status",
-  "วันที่อัพเดทสถานะล่าสุด/Date Latest status",
-  "สร้างโดย/Created by",
-  "วันที่สร้าง/Date",
-  "Candidate Status",
-  "Shortlist",
-  "1st round interview",
-  "2nd round interview",
-  "Final round interview",
-  "Offering เสนอผลประโยชน์",
-  "Hiring",
-  "Onboarding",
-  "Channel",
-  "Turndown Reason",
-  "Turndown Date",
-  "Resume",
-  "SLA by Level",
-  "SLA (Shortlist)",
-  "SLA (Interview)",
-  "SLA (Offering)",
-  "SLA (Hiring)",
-  "SLA (Onboarding)",
+  "คำนำหน้าชื่อ", "ชื่อ (ไทย)", "สกุล (ไทย)", "ชื่อ (อังกฤษ)",
+  "สกุล (อังกฤษ)", "ชื่อเล่น", "รหัสบัตรประชาชน", "วันเกิด",
+  "เบอร์ติดต่อ", "email", "JR No.", "หน่วยธุรกิจ/BU",
+  "ตำแหน่งที่ขอรับ/Requested Position", "ประเภทการจ้าง/Employment Category",
+  "ระดับ/Level", "ผู้รับผิดชอบ/Manage by", "สถานะล่าสุด/Latest status",
+  "วันที่อัพเดทสถานะล่าสุด/Date Latest status", "สร้างโดย/Created by",
+  "วันที่สร้าง/Date", "Candidate Status", "Shortlist", "1st round interview",
+  "2nd round interview", "Final round interview", "Offering เสนอผลประโยชน์",
+  "Hiring", "Onboarding", "Channel", "Turndown Reason", "Turndown Date",
+  "Resume", "SLA by Level", "SLA (Shortlist)", "SLA (Interview)",
+  "SLA (Offering)", "SLA (Hiring)", "SLA (Onboarding)",
 ];
-const CANDIDATE_MAX_COLUMNS = 38; // keep A..AP, drop AQ onward
-const CANDIDATE_WIDTH = 26;
+
+const CANDIDATE_MAX_COLUMNS = 38;
+const CANDIDATE_WIDTH = 24;
 const HEADER_COLOR_A_J = "FF1CBBD8";
 const HEADER_COLOR_K_V_AF = "FF5387D9";
 const HEADER_COLOR_L_U_AG_AL = "FFFED243";
- 
+
 // =========================
 // CLI ARGS
 // =========================
@@ -84,47 +51,37 @@ function getArg(flag: string, fallback?: string) {
   if (idx >= 0 && process.argv[idx + 1]) return process.argv[idx + 1];
   return fallback;
 }
- 
+
 const CURRENT_DIR = process.cwd();
 const IN_DIR = path.resolve(getArg("--in", path.join(CURRENT_DIR, "input"))!);
 const OUT_FILE = path.resolve(getArg("--out", path.join(CURRENT_DIR, "output", "recruitment-tracking.xlsx"))!);
- 
+
 // Ensure output dir exists (Run Main Logic)
 await mainWrapper();
- 
+
 // =========================
 // UTIL
 // =========================
- 
-// [FIXED] Robust ensureDir: ดักจับ Error EEXIST เพื่อป้องกันโปรแกรมหยุดทำงานถ้าโฟลเดอร์มีอยู่แล้ว
+
 async function ensureDir(p: string) {
   try {
     await fsp.mkdir(p, { recursive: true });
   } catch (err: any) {
-    // ถ้า Error เพราะโฟลเดอร์มีอยู่แล้ว ให้ปล่อยผ่าน (ถือว่าสำเร็จ)
-    if (err.code === 'EEXIST') {
-      return;
-    }
-    // ถ้าเป็น Error อื่น (เช่น Permission) ให้โยนออกมา
+    if (err.code === 'EEXIST') return;
     throw err;
   }
 }
- 
-function nowISO() {
-  const d = new Date();
-  return d.toISOString().replace(/[:.]/g, "-");
-}
- 
+
 function normalizeHeader(h: any): string {
   if (h === null || h === undefined) return "";
   return String(h).replace(/\uFEFF/g, "").replace(/\s+/g, " ").trim();
 }
- 
+
 function safeStr(v: any): string {
   if (v === null || v === undefined) return "";
   return String(v).trim();
 }
- 
+
 async function fileExists(p: string) {
   try {
     await fsp.access(p, fs.constants.F_OK);
@@ -133,10 +90,7 @@ async function fileExists(p: string) {
     return false;
   }
 }
- 
-// =========================
-// LOCK (for shared file)
-// =========================
+
 async function acquireLock(lockPath: string, timeoutMs = 120_000, pollMs = 500) {
   const start = Date.now();
   while (true) {
@@ -147,26 +101,18 @@ async function acquireLock(lockPath: string, timeoutMs = 120_000, pollMs = 500) 
       return;
     } catch (e: any) {
       if (e?.code !== "EEXIST") throw e;
-      if (Date.now() - start > timeoutMs) {
-        throw new Error(`Timeout waiting for lock: ${lockPath}`);
-      }
+      if (Date.now() - start > timeoutMs) throw new Error(`Timeout waiting for lock: ${lockPath}`);
       await new Promise((r) => setTimeout(r, pollMs));
     }
   }
 }
- 
+
 async function releaseLock(lockPath: string) {
   try {
     await fsp.unlink(lockPath);
-  } catch {
-    // ignore
-  }
+  } catch { /* ignore */ }
 }
- 
-// =========================
-// EXCEL READ/WRITE
-// =========================
- 
+
 function readWorkbook(filePath: string) {
   try {
     const fileBuffer = fs.readFileSync(filePath);
@@ -175,19 +121,15 @@ function readWorkbook(filePath: string) {
     throw new Error(`Error reading file at ${filePath}: ${error}`);
   }
 }
- 
-function sheetToObjects(
-  wb: XLSX.WorkBook,
-  sheetName: string,
-  options?: { headerRow?: number },
-) {
+
+function sheetToObjects(wb: XLSX.WorkBook, sheetName: string, options?: { headerRow?: number }) {
   const ws = wb.Sheets[sheetName];
   if (!ws) return [];
   const jsonOptions: XLSX.Sheet2JSONOpts = { defval: "" };
   if (options?.headerRow !== undefined) jsonOptions.range = options.headerRow;
   return XLSX.utils.sheet_to_json<Record<string, any>>(ws, jsonOptions);
 }
- 
+
 function getSheetHeadersAtRow(ws: XLSX.WorkSheet, rowIndex: number): string[] {
   if (!ws) return [];
   const range = XLSX.utils.decode_range(ws["!ref"] || "A1:A1");
@@ -200,40 +142,28 @@ function getSheetHeadersAtRow(ws: XLSX.WorkSheet, rowIndex: number): string[] {
   while (headers.length && !headers[headers.length - 1]) headers.pop();
   return headers.filter(Boolean);
 }
- 
+
 function findHeaderRowInfo(wb: XLSX.WorkBook, sheetName: string, maxScanRows = 30) {
   const ws = wb.Sheets[sheetName];
   if (!ws) return { headerRow: 0, headers: [] as string[], type: "UNKNOWN" as const };
- 
   const range = XLSX.utils.decode_range(ws["!ref"] || "A1:A1");
   const start = range.s.r;
   const end = Math.min(range.e.r, start + maxScanRows - 1);
- 
   const defaultHeaders = getSheetHeadersAtRow(ws, start);
   for (let row = start; row <= end; row++) {
     const headers = getSheetHeadersAtRow(ws, row);
     const type = detectTypeByHeaders(headers);
     if (type !== "UNKNOWN") return { headerRow: row, headers, type };
   }
- 
-  return {
-    headerRow: start,
-    headers: defaultHeaders,
-    type: detectTypeByHeaders(defaultHeaders),
-  };
+  return { headerRow: start, headers: defaultHeaders, type: detectTypeByHeaders(defaultHeaders) };
 }
- 
+
 function objectsToSheet(rows: Record<string, any>[], headerOrder?: string[]) {
   const allKeys = new Set<string>();
   for (const r of rows) Object.keys(r).forEach((k) => allKeys.add(k));
- 
   const headers: string[] = [];
-  if (headerOrder && headerOrder.length) {
-    for (const h of headerOrder) headers.push(h);
-  }
-  for (const k of allKeys) {
-    if (!headers.includes(k)) headers.push(k);
-  }
+  if (headerOrder && headerOrder.length) for (const h of headerOrder) headers.push(h);
+  for (const k of allKeys) if (!headers.includes(k)) headers.push(k);
   const normalized = rows.map((r) => {
     const out: Record<string, any> = {};
     for (const h of headers) out[h] = r[h] ?? "";
@@ -241,57 +171,21 @@ function objectsToSheet(rows: Record<string, any>[], headerOrder?: string[]) {
   });
   return XLSX.utils.json_to_sheet(normalized, { header: headers });
 }
- 
-function upsertCandidateRows(
-  existing: Record<string, any>[],
-  incoming: Record<string, any>[],
-) {
-  const map = new Map<string, Record<string, any>>();
-  for (const r of existing) {
-    const key = safeStr(r[CANDIDATE_KEY]);
-    if (!key) continue;
-    map.set(key, { ...r });
-  }
-  for (const r of incoming) {
-    const key = safeStr(r[CANDIDATE_KEY]);
-    if (!key) continue;
-    if (!map.has(key)) {
-      map.set(key, { ...r });
-    } else {
-      const cur = map.get(key)!;
-      for (const col of CANDIDATE_BASE_COLS) {
-        cur[col] = r[col] ?? cur[col] ?? "";
-      }
-      map.set(key, cur);
-    }
-  }
-  return Array.from(map.values());
-}
- 
+
 function toCandidateBaseRow(row: Record<string, any>) {
   const out: Record<string, any> = {};
   for (const col of CANDIDATE_BASE_COLS) out[col] = row[col] ?? "";
   return out;
 }
- 
-function projectRowsToHeaders(rows: Record<string, any>[], headers: string[]) {
-  return rows.map((row) => {
-    const out: Record<string, any> = {};
-    for (const h of headers) out[h] = row[h] ?? "";
-    return out;
-  });
-}
- 
+
 function buildHeaderOrder(rows: Record<string, any>[], preferred: string[] = []) {
   const allKeys = new Set<string>();
   for (const r of rows) Object.keys(r).forEach((k) => allKeys.add(k));
   const headers = [...preferred];
-  for (const k of allKeys) {
-    if (!headers.includes(k)) headers.push(k);
-  }
+  for (const k of allKeys) if (!headers.includes(k)) headers.push(k);
   return headers;
 }
- 
+
 function shiftFormulaRows(formula: string, rowDelta: number) {
   return formula.replace(
     /(?<![A-Z0-9_])(\$?[A-Z]{1,3})(\$?)(\d+)(?![A-Z0-9_])/gi,
@@ -302,116 +196,204 @@ function shiftFormulaRows(formula: string, rowDelta: number) {
     },
   );
 }
- 
+
 function cloneCellValue<T>(value: T): T {
-  if (value instanceof Date) return new Date(value.getTime()) as T;
+  if (value instanceof Date) {
+    if (isNaN(value.getTime())) return null as unknown as T;
+    return new Date(value.getTime()) as T;
+  }
   if (value && typeof value === "object") {
-    try {
-      return structuredClone(value);
-    } catch {
-      return JSON.parse(JSON.stringify(value)) as T;
-    }
+    try { return structuredClone(value); } catch { return JSON.parse(JSON.stringify(value)) as T; }
   }
   return value;
 }
- 
+
 function excelCellValueToString(v: ExcelJS.CellValue): string {
   if (v === null || v === undefined) return "";
   if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") return safeStr(v);
-  if (v instanceof Date) return safeStr(v.toISOString());
+  if (v instanceof Date) {
+    if (isNaN(v.getTime())) return ""; 
+    return safeStr(v.toISOString());
+  }
   if (typeof v === "object") {
     const anyV = v as any;
     if (typeof anyV.text === "string") return safeStr(anyV.text);
     if (typeof anyV.result === "string" || typeof anyV.result === "number") return safeStr(anyV.result);
-    if (Array.isArray(anyV.richText)) {
-      return safeStr(anyV.richText.map((x: any) => x?.text ?? "").join(""));
+    if (anyV.result instanceof Date) {
+        if (isNaN(anyV.result.getTime())) return "";
+        return safeStr(anyV.result.toISOString());
     }
+    if (Array.isArray(anyV.richText)) return safeStr(anyV.richText.map((x: any) => x?.text ?? "").join(""));
   }
   return "";
 }
- 
-function cloneCandidateRowTemplate(
-  ws: ExcelJS.Worksheet,
-  fromRow: number,
-  toRow: number,
-  maxCol: number,
-) {
+
+function cloneCandidateRowTemplate(ws: ExcelJS.Worksheet, fromRow: number, toRow: number, maxCol: number) {
   for (let c = 1; c <= maxCol; c++) {
     const src = ws.getCell(fromRow, c);
     const dst = ws.getCell(toRow, c);
- 
+
     if (src.style) dst.style = cloneCellValue(src.style);
- 
-    const sv: any = src.value;
-    if (sv && typeof sv === "object" && typeof sv.formula === "string") {
-      dst.value = { formula: shiftFormulaRows(sv.formula, toRow - fromRow) };
+    if (src.dataValidation) dst.dataValidation = cloneCellValue(src.dataValidation);
+
+    if (c >= 22 && c <= 31) {
+       dst.value = null;
     } else {
-      dst.value = cloneCellValue(sv);
+       const sv: any = src.value;
+       if (sv && typeof sv === "object" && typeof sv.formula === "string") {
+         dst.value = { formula: shiftFormulaRows(sv.formula, toRow - fromRow) };
+       } else {
+         dst.value = cloneCellValue(sv);
+       }
     }
   }
 }
- 
-function upsertCandidateSheetWithExcelJS(
-  ws: ExcelJS.Worksheet,
-  incoming: Record<string, any>[],
-  headerOrder: string[],
-) {
+
+// =========================================================
+// [FINAL PERFECT v3] Safe Upsert + Fix SLA Date Format Issue
+// =========================================================
+function upsertCandidateSheetWithExcelJS(ws: ExcelJS.Worksheet, incoming: Record<string, any>[], headerOrder: string[]) {
   const maxCol = Math.min(CANDIDATE_MAX_COLUMNS, headerOrder.length);
   if (maxCol <= 0) return 1;
- 
+
   for (let c = 1; c <= maxCol; c++) ws.getCell(1, c).value = headerOrder[c - 1] ?? "";
   if (ws.columnCount > maxCol) ws.spliceColumns(maxCol + 1, ws.columnCount - maxCol);
- 
+
   const colByHeader = new Map<string, number>();
   for (let c = 1; c <= maxCol; c++) {
     const h = normalizeHeader(headerOrder[c - 1]);
     if (h) colByHeader.set(h, c);
   }
- 
+
   const keyCol = colByHeader.get(CANDIDATE_KEY);
   if (!keyCol) throw new Error(`ไม่พบคอลัมน์ key "${CANDIDATE_KEY}" ใน ${SHEET_CANDIDATE}`);
- 
+
   const baseColsInfo: Array<{ h: (typeof CANDIDATE_BASE_COLS)[number]; c: number }> = [];
   for (const h of CANDIDATE_BASE_COLS) {
     const c = colByHeader.get(h);
     if (c) baseColsInfo.push({ h, c });
   }
- 
+
   const keyToRow = new Map<string, number>();
-  let lastDataRow = 1; // header row
+  let lastDataRow = 1; 
   const scanUntil = Math.max(ws.rowCount, ws.actualRowCount);
+  
   for (let r = 2; r <= scanUntil; r++) {
     const key = excelCellValueToString(ws.getCell(r, keyCol).value);
     let hasBaseData = false;
     for (const b of baseColsInfo) {
-      if (excelCellValueToString(ws.getCell(r, b.c).value)) {
-        hasBaseData = true;
-        break;
-      }
+      if (excelCellValueToString(ws.getCell(r, b.c).value)) hasBaseData = true;
     }
     if (key) keyToRow.set(key, r);
     if (key || hasBaseData) lastDataRow = r;
   }
- 
+
   for (const row of incoming) {
     const key = safeStr(row[CANDIDATE_KEY]);
     if (!key) continue;
-    const existingRow = keyToRow.get(key);
-    if (existingRow) {
-      for (const b of baseColsInfo) ws.getCell(existingRow, b.c).value = row[b.h] ?? "";
-      continue;
+
+    let targetRow = keyToRow.get(key);
+    
+    // --- CASE 1: NEW ROW ---
+    if (!targetRow) {
+      targetRow = lastDataRow + 1;
+      if (lastDataRow >= 2) cloneCandidateRowTemplate(ws, lastDataRow, targetRow, maxCol);
+      
+      for (let c = 22; c <= 31; c++) ws.getCell(targetRow, c).value = null;
+
+      const incomingJR = row[JR_NO_ALIAS];
+      if (incomingJR) ws.getCell(targetRow, 11).value = incomingJR;
+
+      keyToRow.set(key, targetRow);
+      lastDataRow = targetRow;
     }
-    const newRow = lastDataRow + 1;
-    if (lastDataRow >= 2) cloneCandidateRowTemplate(ws, lastDataRow, newRow, maxCol);
-    for (const b of baseColsInfo) ws.getCell(newRow, b.c).value = row[b.h] ?? "";
-    keyToRow.set(key, newRow);
-    lastDataRow = newRow;
+
+    // --- CASE 2: EXISTING ROW ---
+    const r = targetRow;
+
+    // A. Base Data
+    for (const b of baseColsInfo) {
+        let val = row[b.h];
+        if (val instanceof Date && isNaN(val.getTime())) val = "";
+        ws.getCell(r, b.c).value = val ?? "";
+    }
+
+    // B. JR No. (Skipped for existing)
+
+    // C. Update Formulas
+    ws.getCell(r, 12).value = { formula: `IFERROR(VLOOKUP($K${r},JR_Detail!$A:$O,2,0),"")` };
+    ws.getCell(r, 13).value = { formula: `IFERROR(VLOOKUP($K${r},JR_Detail!$A:$O,3,0),"")` };
+    ws.getCell(r, 14).value = { formula: `IFERROR(VLOOKUP($K${r},JR_Detail!$A:$O,4,0),"")` };
+    ws.getCell(r, 15).value = { formula: `IFERROR(VLOOKUP($K${r},JR_Detail!$A:$O,5,0),"")` };
+    ws.getCell(r, 16).value = { formula: `IFERROR(VLOOKUP($K${r},JR_Detail!$A:$O,11,0),"")` };
+    ws.getCell(r, 17).value = { formula: `IFERROR(VLOOKUP($K${r},JR_Detail!$A:$O,12,0),"")` };
+
+    // Date Latest Status (R)
+    const cellR = ws.getCell(r, 18);
+    cellR.value = { formula: `IFERROR(VLOOKUP($K${r},JR_Detail!$A:$O,13,0),"")` };
+    cellR.numFmt = 'yyyy-mm-dd';
+
+    ws.getCell(r, 19).value = { formula: `IFERROR(VLOOKUP($K${r},JR_Detail!$A:$O,14,0),"")` };
+
+    // Created Date (T)
+    const cellT = ws.getCell(r, 20);
+    cellT.value = { formula: `IFERROR(VLOOKUP($K${r},JR_Detail!$A:$O,15,0),"")` };
+    cellT.numFmt = 'yyyy-mm-dd';
+
+    // Candidate Status (U)
+    ws.getCell(r, 21).value = { formula: `IF(AD${r}<>"", "Turndown", IFERROR(LOOKUP(2, 1/(V${r}:AB${r}<>""), V$1:AB$1), ""))` };
+
+    // SLA Formulas
+    // [FIXED] Force Format to "General" or "0" (Number) instead of Date
+    const cellSLA_Level = ws.getCell(r, 33);
+    cellSLA_Level.value = { formula: `IF(OR(ISNUMBER(SEARCH("Collector", M${r})), ISNUMBER(SEARCH("Underwriting", M${r})), ISNUMBER(SEARCH("Contact Center", M${r}))), 30, IF(OR(O${r}="Chief", O${r}="Head of"), 90, IF(OR(O${r}="Team lead", O${r}="Senior Professional", O${r}="Expert"), 60, IF(OR(O${r}="Professional", O${r}="Support"), 45, 0))))` };
+    cellSLA_Level.numFmt = '0'; // Show as Integer (e.g. 30, 45, 60)
+
+    const cellSLA_Shortlist = ws.getCell(r, 34);
+    cellSLA_Shortlist.value = { formula: `IF(V${r}<>"", IFERROR(VALUE(V${r})-VALUE(T${r}), ""), "")` };
+    cellSLA_Shortlist.numFmt = '0';
+
+    const cellSLA_Interview = ws.getCell(r, 35);
+    cellSLA_Interview.value = { formula: `IF(Y${r}<>"", IFERROR(VALUE(Y${r})-VALUE(T${r}), ""), IF(X${r}<>"", IFERROR(VALUE(X${r})-VALUE(T${r}), ""), IF(W${r}<>"", IFERROR(VALUE(W${r})-VALUE(T${r}), ""), "")))` };
+    cellSLA_Interview.numFmt = '0';
+
+    const cellSLA_Offering = ws.getCell(r, 36);
+    cellSLA_Offering.value = { formula: `IF(Z${r}<>"", IFERROR(VALUE(Z${r})-VALUE(T${r}), ""), "")` };
+    cellSLA_Offering.numFmt = '0';
+
+    const cellSLA_Hiring = ws.getCell(r, 37);
+    cellSLA_Hiring.value = { formula: `IF(AA${r}<>"", IFERROR(VALUE(AA${r})-VALUE(T${r}), ""), "")` };
+    cellSLA_Hiring.numFmt = '0';
+
+    const cellSLA_Onboarding = ws.getCell(r, 38);
+    cellSLA_Onboarding.value = { formula: `IF(AB${r}<>"", IFERROR(VALUE(AB${r})-VALUE(T${r}), ""), "")` };
+    cellSLA_Onboarding.numFmt = '0';
+
+    // D. Data Validation
+    for (let c = 22; c <= 28; c++) {
+        const cell = ws.getCell(r, c);
+        cell.dataValidation = {
+            type: 'date', operator: 'greaterThan', showErrorMessage: true,
+            errorTitle: 'Date Only', error: 'กรุณากรอกวันที่ (วว/ดด/ปปปป)', formulae: [new Date("2020-01-01")]
+        };
+        cell.numFmt = 'yyyy-mm-dd';
+    }
+    ws.getCell(r, 29).dataValidation = { type: 'list', allowBlank: true, formulae: ['"LinkedIn,JobThai,Referral,Agency,Walk-in"'] };
+    ws.getCell(r, 30).dataValidation = { type: 'list', allowBlank: true, formulae: ['"Salary,Counter Offer,Culture Fit,Ghosting,Skill Mismatch,Other"'] };
+    
+    const cellTurndownDate = ws.getCell(r, 31);
+    cellTurndownDate.dataValidation = {
+      type: 'date', operator: 'greaterThan', showErrorMessage: true,
+      errorTitle: 'Date Only', error: 'กรุณากรอกวันที่ Turndown', formulae: [new Date("2020-01-01")]
+    };
+    cellTurndownDate.numFmt = 'yyyy-mm-dd';
   }
+
   return lastDataRow;
 }
- 
+
 function applyCandidateFormattingWithExcelJS(ws: ExcelJS.Worksheet, lastRow: number) {
-  const maxCol = CANDIDATE_MAX_COLUMNS;
+  const maxCol = Math.min(CANDIDATE_MAX_COLUMNS, ws.columnCount);
   const endRow = Math.max(1, lastRow);
   for (let c = 1; c <= maxCol; c++) ws.getColumn(c).width = CANDIDATE_WIDTH;
   const thinBorder: Partial<ExcelJS.Borders> = {
@@ -424,160 +406,73 @@ function applyCandidateFormattingWithExcelJS(ws: ExcelJS.Worksheet, lastRow: num
     for (let c = 1; c <= maxCol; c++) ws.getCell(r, c).border = thinBorder;
   }
   const fillHeader = (from: number, to: number, argb: string) => {
-    for (let c = from; c <= to; c++) {
-      ws.getCell(1, c).fill = {
-        type: "pattern",
-        pattern: "solid",
-        fgColor: { argb },
-      };
-    }
+    const end = Math.min(to, maxCol);
+    for (let c = from; c <= end; c++) ws.getCell(1, c).fill = { type: "pattern", pattern: "solid", fgColor: { argb } };
   };
-  fillHeader(1, 10, HEADER_COLOR_A_J); // A-J
-  fillHeader(11, 11, HEADER_COLOR_K_V_AF); // K
-  fillHeader(22, 32, HEADER_COLOR_K_V_AF); // V-AF
-  fillHeader(12, 21, HEADER_COLOR_L_U_AG_AL); // L-U
-  fillHeader(33, 38, HEADER_COLOR_L_U_AG_AL); // AG-AL
-  for (let r = 1; r <= endRow; r++) {
-    const a = ws.getCell(r, 1);
-    a.font = { ...(a.font ?? {}), bold: true };
+  fillHeader(1, 10, HEADER_COLOR_A_J);
+  fillHeader(11, 11, HEADER_COLOR_K_V_AF);
+  fillHeader(22, 32, HEADER_COLOR_K_V_AF);
+  fillHeader(12, 21, HEADER_COLOR_L_U_AG_AL);
+  fillHeader(33, 38, HEADER_COLOR_L_U_AG_AL);
+
+  ws.getRow(1).height = 32;
+  const WHITE = "FFFFFFFF";
+  const BLACK = "FF000000";
+
+  function headerFontColorByCol(col: number) {
+    if ((col >= 1 && col <= 10) || col === 11 || (col >= 22 && col <= 32)) return WHITE;
+    return BLACK;
   }
+
+  for (let c = 1; c <= maxCol; c++) {
+    const cell = ws.getCell(1, c);
+    cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+    cell.font = { ...(cell.font ?? {}), bold: true, size: 14, color: { argb: headerFontColorByCol(c) } };
+  }
+  
+  for (let r = 1; r <= endRow; r++) ws.getCell(r, 1).font = { ...(ws.getCell(r, 1).font ?? {}), bold: true };
+  ws.views = [{ state: "frozen", ySplit: 1 }];
+  const lastColLetter = ws.getColumn(maxCol).letter;
+  ws.autoFilter = { from: "A1", to: `${lastColLetter}1` };
 }
- 
-function rewriteJRSheetWithExcelJS(
-  wb: ExcelJS.Workbook,
-  headers: string[],
-  rows: Record<string, any>[],
-) {
+
+function rewriteJRSheetWithExcelJS(wb: ExcelJS.Workbook, headers: string[], rows: Record<string, any>[]) {
   const old = wb.getWorksheet(SHEET_JR);
   if (old) wb.removeWorksheet(old.id);
   const ws = wb.addWorksheet(SHEET_JR);
+  
   const cols = headers.length ? headers : ["_"];
+  
   for (let c = 1; c <= cols.length; c++) ws.getCell(1, c).value = cols[c - 1];
+
   for (let i = 0; i < rows.length; i++) {
-    for (let c = 1; c <= cols.length; c++) ws.getCell(i + 2, c).value = rows[i][cols[c - 1]] ?? "";
-  }
-}
- 
-function setCellValueKeepStyle(
-  ws: XLSX.WorkSheet,
-  r: number,
-  c: number,
-  value: any,
-) {
-  const addr = XLSX.utils.encode_cell({ r, c });
-  const prev = ws[addr] as any;
-  const prevStyle = prev?.s;
-  const prevFmt = prev?.z;
-  XLSX.utils.sheet_add_aoa(ws, [[value]], { origin: { r, c } });
-  const cur = ws[addr] as any;
-  if (!cur) return;
-  if (prevStyle !== undefined) cur.s = prevStyle;
-  if (prevFmt !== undefined) cur.z = prevFmt;
-}
- 
-function cloneRowWithFormulaShift(
-  ws: XLSX.WorkSheet,
-  fromRow: number,
-  toRow: number,
-  maxCol: number,
-) {
-  for (let c = 0; c <= maxCol; c++) {
-    const fromAddr = XLSX.utils.encode_cell({ r: fromRow, c });
-    const toAddr = XLSX.utils.encode_cell({ r: toRow, c });
-    const src = ws[fromAddr] as any;
-    if (!src) {
-      delete ws[toAddr];
-      continue;
-    }
-    const dst: Record<string, any> = { ...src };
-    if (typeof src.f === "string") {
-      dst.f = shiftFormulaRows(src.f, toRow - fromRow);
-      delete dst.v;
-    }
-    ws[toAddr] = dst;
-  }
-}
- 
-function upsertCandidateSheetInPlace(
-  ws: XLSX.WorkSheet,
-  incoming: Record<string, any>[],
-  headerOrder: string[],
-  maxColumns: number,
-) {
-  const maxCol = Math.min(maxColumns, headerOrder.length) - 1;
-  if (maxCol < 0) return 0;
-  const range = XLSX.utils.decode_range(ws["!ref"] || "A1:A1");
-  for (let c = 0; c <= maxCol; c++) {
-    setCellValueKeepStyle(ws, 0, c, headerOrder[c] ?? "");
-  }
-  if (range.e.c > maxCol) {
-    for (let r = 0; r <= range.e.r; r++) {
-      for (let c = maxCol + 1; c <= range.e.c; c++) {
-        const addr = XLSX.utils.encode_cell({ r, c });
-        delete ws[addr];
+    for (let c = 1; c <= cols.length; c++) {
+      const headerName = cols[c - 1];
+      let val = rows[i][headerName];
+
+      if (
+        (headerName.includes("Date") || headerName.includes("วันที่")) && 
+        typeof val === 'string' && 
+        /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(val)
+      ) {
+        try {
+          const parts = val.split('/');
+          const dateObj = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+          if (!isNaN(dateObj.getTime())) val = dateObj;
+        } catch { /* ignore */ }
       }
+
+      const cell = ws.getCell(i + 2, c);
+      cell.value = val ?? "";
+      if (val instanceof Date) cell.numFmt = 'dd/mm/yyyy';
     }
   }
-  const colByHeader = new Map<string, number>();
-  for (let c = 0; c <= maxCol; c++) {
-    const h = normalizeHeader(headerOrder[c]);
-    if (h) colByHeader.set(h, c);
-  }
-  const keyCol = colByHeader.get(CANDIDATE_KEY);
-  if (keyCol === undefined) throw new Error(`ไม่พบคอลัมน์ key "${CANDIDATE_KEY}" ใน ${SHEET_CANDIDATE}`);
-  const baseColsInfo: Array<{ h: (typeof CANDIDATE_BASE_COLS)[number]; c: number }> = [];
-  for (const h of CANDIDATE_BASE_COLS) {
-    const c = colByHeader.get(h);
-    if (c !== undefined) baseColsInfo.push({ h, c });
-  }
-  const keyToRow = new Map<string, number>();
-  let lastDataRow = 0;
-  for (let r = 1; r <= range.e.r; r++) {
-    let hasBaseData = false;
-    for (const b of baseColsInfo) {
-      const addr = XLSX.utils.encode_cell({ r, c: b.c });
-      if (safeStr((ws[addr] as any)?.v)) {
-        hasBaseData = true;
-        break;
-      }
-    }
-    const keyAddr = XLSX.utils.encode_cell({ r, c: keyCol });
-    const key = safeStr((ws[keyAddr] as any)?.v);
-    if (key) keyToRow.set(key, r);
-    if (key || hasBaseData) lastDataRow = r;
-  }
-  for (const row of incoming) {
-    const key = safeStr(row[CANDIDATE_KEY]);
-    if (!key) continue;
-    const foundRow = keyToRow.get(key);
-    if (foundRow !== undefined) {
-      for (const b of baseColsInfo) setCellValueKeepStyle(ws, foundRow, b.c, row[b.h] ?? "");
-      continue;
-    }
-    const newRow = lastDataRow + 1;
-    if (lastDataRow >= 1) cloneRowWithFormulaShift(ws, lastDataRow, newRow, maxCol);
-    for (const b of baseColsInfo) setCellValueKeepStyle(ws, newRow, b.c, row[b.h] ?? "");
-    keyToRow.set(key, newRow);
-    lastDataRow = newRow;
-  }
-  ws["!ref"] = XLSX.utils.encode_range({
-    s: { r: 0, c: 0 },
-    e: { r: Math.max(range.e.r, lastDataRow), c: maxCol },
-  });
-  return lastDataRow;
 }
- 
-// -------------------------------------------------------------
-// [UPDATED] Robust Header Detection Logic
-// -------------------------------------------------------------
+
 function cleanHeaderForDetection(h: string) {
-  return String(h || "")
-    .replace(/\uFEFF/g, "")
-    .replace(/[\u200B-\u200D\uFEFF]/g, "")
-    .replace(/\s+/g, "")
-    .trim();
+  return String(h || "").replace(/\uFEFF/g, "").replace(/[\u200B-\u200D\uFEFF]/g, "").replace(/\s+/g, "").trim();
 }
- 
+
 function detectTypeByHeaders(headers: string[]) {
   const cleaned = headers.map(cleanHeaderForDetection);
   const hs = new Set(cleaned);
@@ -588,7 +483,7 @@ function detectTypeByHeaders(headers: string[]) {
   if (isJR) return "JR";
   return "UNKNOWN";
 }
- 
+
 async function listExcelFiles(dir: string) {
   const items = await fsp.readdir(dir, { withFileTypes: true });
   const files: string[] = [];
@@ -599,7 +494,7 @@ async function listExcelFiles(dir: string) {
   }
   return files;
 }
- 
+
 async function pickLatestByType(inDir: string) {
   const files = await listExcelFiles(inDir);
   const candidates: { file: string; mtime: number }[] = [];
@@ -626,12 +521,9 @@ async function pickLatestByType(inDir: string) {
   }
   candidates.sort((a, b) => b.mtime - a.mtime);
   jrs.sort((a, b) => b.mtime - a.mtime);
-  return {
-    candidateFile: candidates[0]?.file,
-    jrFile: jrs[0]?.file,
-  };
+  return { candidateFile: candidates[0]?.file, jrFile: jrs[0]?.file };
 }
- 
+
 function readAllRowsFromFirstSheet(filePath: string) {
   const wb = readWorkbook(filePath);
   const sheetName = wb.SheetNames[0];
@@ -639,87 +531,85 @@ function readAllRowsFromFirstSheet(filePath: string) {
   const rows = sheetToObjects(wb, sheetName, { headerRow });
   return { wb, sheetName, rows, headerRow };
 }
- 
-// =========================
-// MAIN WRAPPER
-// =========================
+
 async function mainWrapper() {
     try {
         await main();
     } catch (err: any) {
         console.error("❌ ERROR:", err?.message || err);
-        process.exit(1);
+        console.log("Press any key to exit...");
+        process.stdin.setRawMode(true);
+        process.stdin.resume();
+        process.stdin.on('data', process.exit.bind(process, 1));
     }
 }
- 
+
 async function main() {
   console.log(`Working Directory: ${CURRENT_DIR}`);
   console.log(`Input Directory: ${IN_DIR}`);
   console.log(`Output File: ${OUT_FILE}`);
- 
+
   await ensureDir(IN_DIR);
   await ensureDir(path.dirname(OUT_FILE));
- 
+
   const { candidateFile, jrFile } = await pickLatestByType(IN_DIR);
- 
+
   if (!candidateFile) throw new Error(`ไม่พบไฟล์ Candidate (.xlsx/.xls) ที่มีคอลัมน์ "${CANDIDATE_KEY}" ในโฟลเดอร์ ${IN_DIR}`);
   if (!jrFile) throw new Error(`ไม่พบไฟล์ JR (.xlsx/.xls) ที่มีคอลัมน์ "${JR_KEY}" หรือ "${JR_NO_ALIAS}" ในโฟลเดอร์ ${IN_DIR}`);
- 
+
   const candParsed = readAllRowsFromFirstSheet(candidateFile);
   const jrParsed = readAllRowsFromFirstSheet(jrFile);
   const candIncoming = candParsed.rows.map(toCandidateBaseRow);
   const jrIncoming = jrParsed.rows;
- 
+
   console.log("✅ Auto-detect input:");
   console.log(" - Candidate:", candidateFile);
   console.log(" - JR       :", jrFile);
   console.log(` - Candidate header row: ${candParsed.headerRow + 1}`);
   console.log(` - JR header row       : ${jrParsed.headerRow + 1}`);
- 
+
   for (const r of jrIncoming) {
     if (r[JR_KEY] !== undefined && r[JR_NO_ALIAS] === undefined) {
       r[JR_NO_ALIAS] = r[JR_KEY];
     }
   }
- 
-  let existingCandidate: Record<string, any>[] = [];
+
   if (await fileExists(OUT_FILE)) {
-    const outWb = readWorkbook(OUT_FILE);
-    existingCandidate = sheetToObjects(outWb, SHEET_CANDIDATE);
+    try { const outWb = readWorkbook(OUT_FILE); } catch (e) {
+      throw new Error(`CRITICAL: Cannot read existing output file. Aborting.\nDetails: ${e}`);
+    }
   }
- 
-  const existingExtraHeaders = new Set<string>();
-  for (const r of existingCandidate) Object.keys(r).forEach((k) => existingExtraHeaders.add(k));
- 
-  const candidateHeaderOrder = [
-    ...CANDIDATE_OUTPUT_HEADER_ORDER,
-    ...Array.from(existingExtraHeaders).filter((h) => !CANDIDATE_OUTPUT_HEADER_ORDER.includes(h)),
-  ].slice(0, CANDIDATE_MAX_COLUMNS);
- 
+
   const jrFinal = jrIncoming;
   const jrHeaderOrder = buildHeaderOrder(jrFinal);
- 
+  
+  const candidateHeaderOrder = [...CANDIDATE_OUTPUT_HEADER_ORDER].slice(0, CANDIDATE_MAX_COLUMNS);
+
   const lockPath = OUT_FILE + ".lock";
- 
+
   await acquireLock(lockPath);
   try {
     const wb = new ExcelJS.Workbook();
     const outFileAlreadyExists = await fileExists(OUT_FILE);
-    if (outFileAlreadyExists) await wb.xlsx.readFile(OUT_FILE);
- 
+    
+    if (outFileAlreadyExists) {
+      await wb.xlsx.readFile(OUT_FILE);
+    }
+
     let wsCandidate = wb.getWorksheet(SHEET_CANDIDATE);
     if (!wsCandidate) wsCandidate = wb.addWorksheet(SHEET_CANDIDATE);
+    
     const finalCandidateRows = upsertCandidateSheetWithExcelJS(
       wsCandidate,
       candIncoming,
       candidateHeaderOrder,
     );
     applyCandidateFormattingWithExcelJS(wsCandidate, finalCandidateRows);
- 
+
     rewriteJRSheetWithExcelJS(wb, jrHeaderOrder, jrFinal);
- 
+
     await wb.xlsx.writeFile(OUT_FILE);
- 
+
     console.log("🎉 DONE");
     console.log(" - Fact file:", OUT_FILE);
     console.log(` - Sheets: ${SHEET_CANDIDATE}, ${SHEET_JR}`);
