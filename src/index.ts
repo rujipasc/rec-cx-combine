@@ -236,6 +236,7 @@ function cloneCandidateRowTemplate(ws: ExcelJS.Worksheet, fromRow: number, toRow
     if (src.style) dst.style = cloneCellValue(src.style);
     if (src.dataValidation) dst.dataValidation = cloneCellValue(src.dataValidation);
 
+    // Prevent Ghost Data: Clear user input columns (22-31) for NEW rows
     if (c >= 22 && c <= 31) {
        dst.value = null;
     } else {
@@ -250,11 +251,16 @@ function cloneCandidateRowTemplate(ws: ExcelJS.Worksheet, fromRow: number, toRow
 }
 
 // =========================================================
-// [FINAL PERFECT v3] Safe Upsert + Fix SLA Date Format Issue
+// [FINAL PERFECT v4] Safe Upsert + Logging Statistics
 // =========================================================
 function upsertCandidateSheetWithExcelJS(ws: ExcelJS.Worksheet, incoming: Record<string, any>[], headerOrder: string[]) {
   const maxCol = Math.min(CANDIDATE_MAX_COLUMNS, headerOrder.length);
-  if (maxCol <= 0) return 1;
+  
+  // STATS COUNTERS
+  let insertedCount = 0;
+  let updatedCount = 0;
+
+  if (maxCol <= 0) return { lastDataRow: 1, inserted: 0, updated: 0, originalCount: 0 };
 
   for (let c = 1; c <= maxCol; c++) ws.getCell(1, c).value = headerOrder[c - 1] ?? "";
   if (ws.columnCount > maxCol) ws.spliceColumns(maxCol + 1, ws.columnCount - maxCol);
@@ -274,6 +280,7 @@ function upsertCandidateSheetWithExcelJS(ws: ExcelJS.Worksheet, incoming: Record
     if (c) baseColsInfo.push({ h, c });
   }
 
+  // 3. Scan Existing Rows
   const keyToRow = new Map<string, number>();
   let lastDataRow = 1; 
   const scanUntil = Math.max(ws.rowCount, ws.actualRowCount);
@@ -288,6 +295,10 @@ function upsertCandidateSheetWithExcelJS(ws: ExcelJS.Worksheet, incoming: Record
     if (key || hasBaseData) lastDataRow = r;
   }
 
+  // Count original existing candidates
+  const originalCount = keyToRow.size;
+
+  // 4. Process Incoming Rows
   for (const row of incoming) {
     const key = safeStr(row[CANDIDATE_KEY]);
     if (!key) continue;
@@ -296,6 +307,8 @@ function upsertCandidateSheetWithExcelJS(ws: ExcelJS.Worksheet, incoming: Record
     
     // --- CASE 1: NEW ROW ---
     if (!targetRow) {
+      insertedCount++; // STATS: Insert
+
       targetRow = lastDataRow + 1;
       if (lastDataRow >= 2) cloneCandidateRowTemplate(ws, lastDataRow, targetRow, maxCol);
       
@@ -306,6 +319,8 @@ function upsertCandidateSheetWithExcelJS(ws: ExcelJS.Worksheet, incoming: Record
 
       keyToRow.set(key, targetRow);
       lastDataRow = targetRow;
+    } else {
+      updatedCount++; // STATS: Update
     }
 
     // --- CASE 2: EXISTING ROW ---
@@ -328,46 +343,35 @@ function upsertCandidateSheetWithExcelJS(ws: ExcelJS.Worksheet, incoming: Record
     ws.getCell(r, 16).value = { formula: `IFERROR(VLOOKUP($K${r},JR_Detail!$A:$O,11,0),"")` };
     ws.getCell(r, 17).value = { formula: `IFERROR(VLOOKUP($K${r},JR_Detail!$A:$O,12,0),"")` };
 
-    // Date Latest Status (R)
     const cellR = ws.getCell(r, 18);
     cellR.value = { formula: `IFERROR(VLOOKUP($K${r},JR_Detail!$A:$O,13,0),"")` };
     cellR.numFmt = 'yyyy-mm-dd';
 
     ws.getCell(r, 19).value = { formula: `IFERROR(VLOOKUP($K${r},JR_Detail!$A:$O,14,0),"")` };
 
-    // Created Date (T)
     const cellT = ws.getCell(r, 20);
     cellT.value = { formula: `IFERROR(VLOOKUP($K${r},JR_Detail!$A:$O,15,0),"")` };
     cellT.numFmt = 'yyyy-mm-dd';
 
-    // Candidate Status (U)
     ws.getCell(r, 21).value = { formula: `IF(AD${r}<>"", "Turndown", IFERROR(LOOKUP(2, 1/(V${r}:AB${r}<>""), V$1:AB$1), ""))` };
 
-    // SLA Formulas
-    // [FIXED] Force Format to "General" or "0" (Number) instead of Date
-    const cellSLA_Level = ws.getCell(r, 33);
-    cellSLA_Level.value = { formula: `IF(OR(ISNUMBER(SEARCH("Collector", M${r})), ISNUMBER(SEARCH("Underwriting", M${r})), ISNUMBER(SEARCH("Contact Center", M${r}))), 30, IF(OR(O${r}="Chief", O${r}="Head of"), 90, IF(OR(O${r}="Team lead", O${r}="Senior Professional", O${r}="Expert"), 60, IF(OR(O${r}="Professional", O${r}="Support"), 45, 0))))` };
-    cellSLA_Level.numFmt = '0'; // Show as Integer (e.g. 30, 45, 60)
+    ws.getCell(r, 33).value = { formula: `IF(OR(ISNUMBER(SEARCH("Collector", M${r})), ISNUMBER(SEARCH("Underwriting", M${r})), ISNUMBER(SEARCH("Contact Center", M${r}))), 30, IF(OR(O${r}="Chief", O${r}="Head of"), 90, IF(OR(O${r}="Team lead", O${r}="Senior Professional", O${r}="Expert"), 60, IF(OR(O${r}="Professional", O${r}="Support"), 45, 0))))` };
+    ws.getCell(r, 33).numFmt = '0';
 
-    const cellSLA_Shortlist = ws.getCell(r, 34);
-    cellSLA_Shortlist.value = { formula: `IF(V${r}<>"", IFERROR(VALUE(V${r})-VALUE(T${r}), ""), "")` };
-    cellSLA_Shortlist.numFmt = '0';
+    ws.getCell(r, 34).value = { formula: `IF(V${r}<>"", IFERROR(VALUE(V${r})-VALUE(T${r}), ""), "")` };
+    ws.getCell(r, 34).numFmt = '0';
 
-    const cellSLA_Interview = ws.getCell(r, 35);
-    cellSLA_Interview.value = { formula: `IF(Y${r}<>"", IFERROR(VALUE(Y${r})-VALUE(T${r}), ""), IF(X${r}<>"", IFERROR(VALUE(X${r})-VALUE(T${r}), ""), IF(W${r}<>"", IFERROR(VALUE(W${r})-VALUE(T${r}), ""), "")))` };
-    cellSLA_Interview.numFmt = '0';
+    ws.getCell(r, 35).value = { formula: `IF(Y${r}<>"", IFERROR(VALUE(Y${r})-VALUE(T${r}), ""), IF(X${r}<>"", IFERROR(VALUE(X${r})-VALUE(T${r}), ""), IF(W${r}<>"", IFERROR(VALUE(W${r})-VALUE(T${r}), ""), "")))` };
+    ws.getCell(r, 35).numFmt = '0';
 
-    const cellSLA_Offering = ws.getCell(r, 36);
-    cellSLA_Offering.value = { formula: `IF(Z${r}<>"", IFERROR(VALUE(Z${r})-VALUE(T${r}), ""), "")` };
-    cellSLA_Offering.numFmt = '0';
+    ws.getCell(r, 36).value = { formula: `IF(Z${r}<>"", IFERROR(VALUE(Z${r})-VALUE(T${r}), ""), "")` };
+    ws.getCell(r, 36).numFmt = '0';
 
-    const cellSLA_Hiring = ws.getCell(r, 37);
-    cellSLA_Hiring.value = { formula: `IF(AA${r}<>"", IFERROR(VALUE(AA${r})-VALUE(T${r}), ""), "")` };
-    cellSLA_Hiring.numFmt = '0';
+    ws.getCell(r, 37).value = { formula: `IF(AA${r}<>"", IFERROR(VALUE(AA${r})-VALUE(T${r}), ""), "")` };
+    ws.getCell(r, 37).numFmt = '0';
 
-    const cellSLA_Onboarding = ws.getCell(r, 38);
-    cellSLA_Onboarding.value = { formula: `IF(AB${r}<>"", IFERROR(VALUE(AB${r})-VALUE(T${r}), ""), "")` };
-    cellSLA_Onboarding.numFmt = '0';
+    ws.getCell(r, 38).value = { formula: `IF(AB${r}<>"", IFERROR(VALUE(AB${r})-VALUE(T${r}), ""), "")` };
+    ws.getCell(r, 38).numFmt = '0';
 
     // D. Data Validation
     for (let c = 22; c <= 28; c++) {
@@ -389,7 +393,7 @@ function upsertCandidateSheetWithExcelJS(ws: ExcelJS.Worksheet, incoming: Record
     cellTurndownDate.numFmt = 'yyyy-mm-dd';
   }
 
-  return lastDataRow;
+  return { lastDataRow, inserted: insertedCount, updated: updatedCount, originalCount };
 }
 
 function applyCandidateFormattingWithExcelJS(ws: ExcelJS.Worksheet, lastRow: number) {
@@ -599,22 +603,32 @@ async function main() {
     let wsCandidate = wb.getWorksheet(SHEET_CANDIDATE);
     if (!wsCandidate) wsCandidate = wb.addWorksheet(SHEET_CANDIDATE);
     
-    const finalCandidateRows = upsertCandidateSheetWithExcelJS(
+    const stats = upsertCandidateSheetWithExcelJS(
       wsCandidate,
       candIncoming,
       candidateHeaderOrder,
     );
-    applyCandidateFormattingWithExcelJS(wsCandidate, finalCandidateRows);
+    applyCandidateFormattingWithExcelJS(wsCandidate, stats.lastDataRow);
 
     rewriteJRSheetWithExcelJS(wb, jrHeaderOrder, jrFinal);
 
     await wb.xlsx.writeFile(OUT_FILE);
 
+    // ===================================
+    // 📊 Enhanced Statistics Logging
+    // ===================================
     console.log("🎉 DONE");
     console.log(" - Fact file:", OUT_FILE);
     console.log(` - Sheets: ${SHEET_CANDIDATE}, ${SHEET_JR}`);
-    console.log(` - Candidate rows: ${finalCandidateRows}`);
-    console.log(` - JR rows: ${jrFinal.length}`);
+    console.log("-----------------------------------------");
+    console.log("📊 Statistics:");
+    console.log(` - 👤 Existing Candidates : ${stats.originalCount}`);
+    console.log(` - 🆕 New Inserted        : ${stats.inserted}`);
+    console.log(` - 🔄 Updated             : ${stats.updated}`);
+    console.log(` - 📈 Total Candidate Rows: ${stats.lastDataRow - 1}`); // Minus header
+    console.log(` - 📄 Total JR Rows       : ${jrFinal.length}`);
+    console.log("-----------------------------------------");
+
   } finally {
     await releaseLock(lockPath);
   }
