@@ -517,7 +517,7 @@ function upsertCandidateSheetWithExcelJS(
     ws.getCell(r, 29).dataValidation = {
       type: "list",
       allowBlank: true,
-      formulae: ['"LinkedIn,JobThai,Referral,Agency,Walk-in"'],
+      formulae: ['"Jobthai, JobBkk, JobsDB, LinkedIN, Facebook, Referral, Agency, กรมจัดหางาน, Job Fair, Jobfinfin, Other"'],
     };
     ws.getCell(r, 30).dataValidation = {
       type: "list",
