@@ -6,6 +6,7 @@
   "private": true,
   "scripts": {
     "dev": "bun run src/index.ts",
+    "dashboard": "bun run src/dashboard.ts",
     "check": "tsc -p tsconfig.json --noEmit",
     "build:win": "bun build src/index.ts --compile --target=bun-windows-x64 --outfile dist/rec-cx-combine.exe",
     "build:win-arm": "bun build src/index.ts --compile --target=bun-windows-arm64 --outfile dist/rec-cx-combine-arm64.exe",
