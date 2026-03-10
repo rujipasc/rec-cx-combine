@@ -70,13 +70,16 @@ const CANDIDATE_OUTPUT_HEADER_ORDER: string[] = [
   "Day to Offering",
   "Day to Hiring",
   "Day to Onboarding",
+  "Group",
 ];
 
-const CANDIDATE_MAX_COLUMNS = 39;
+const CANDIDATE_MAX_COLUMNS = 40;
 const CANDIDATE_WIDTH = 24;
 const HEADER_COLOR_A_J = "FF1CBBD8";
 const HEADER_COLOR_K_V_AF = "FF5387D9";
 const HEADER_COLOR_L_U_AG_AL = "FFFED243";
+const GROUP_DROPDOWN_LIST =
+  '"Technology, Risk Management, Credit Risk, Model Data Risk and Special Project, Operations, Marketing, Legal, Business and Channel, Finance and Strategy, People, Innovation and Transformation, CEO Office, AkulakuX, Collection, CardX AMC"';
 
 // =========================
 // CLI ARGS
@@ -319,7 +322,7 @@ function cloneCandidateRowTemplate(
       dst.dataValidation = cloneCellValue(src.dataValidation);
 
     // Prevent Ghost Data: Clear user input columns (22-31) for NEW rows
-    if (c >= 22 && c <= 31) {
+    if ((c >= 22 && c <= 31) || c === 40) {
       dst.value = null;
     } else {
       const sv: any = src.value;
@@ -409,6 +412,7 @@ function upsertCandidateSheetWithExcelJS(
         cloneCandidateRowTemplate(ws, lastDataRow, targetRow, maxCol);
 
       for (let c = 22; c <= 31; c++) ws.getCell(targetRow, c).value = null;
+      ws.getCell(targetRow, 40).value = null;
 
       const incomingJR = row[JR_NO_ALIAS];
       if (incomingJR) ws.getCell(targetRow, 11).value = incomingJR;
@@ -537,6 +541,12 @@ function upsertCandidateSheetWithExcelJS(
       formulae: [new Date("2020-01-01")],
     };
     cellTurndownDate.numFmt = "d mmm yyyy";
+
+    ws.getCell(r, 40).dataValidation = {
+      type: "list",
+      allowBlank: true,
+      formulae: [GROUP_DROPDOWN_LIST],
+    };
   }
 
   return {
@@ -577,13 +587,19 @@ function applyCandidateFormattingWithExcelJS(
   fillHeader(22, 33, HEADER_COLOR_K_V_AF);
   fillHeader(12, 21, HEADER_COLOR_L_U_AG_AL);
   fillHeader(34, 39, HEADER_COLOR_L_U_AG_AL);
+  fillHeader(40, 40, HEADER_COLOR_K_V_AF);
 
   ws.getRow(1).height = 32;
   const WHITE = "FFFFFFFF";
   const BLACK = "FF000000";
 
   function headerFontColorByCol(col: number) {
-    if ((col >= 1 && col <= 10) || col === 11 || (col >= 22 && col <= 33))
+    if (
+      (col >= 1 && col <= 10) ||
+      col === 11 ||
+      (col >= 22 && col <= 33) ||
+      col === 40
+    )
       return WHITE;
     return BLACK;
   }
